@@ -19,20 +19,17 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          # 安装编译所需的依赖，特别是 python2 和 python3 的兼容性包
           sudo apt-get install -y build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip python3 python3-distutils python3-setuptools python-is-python3 file rsync
 
       - name: Download and Extract SDK
         run: |
           wget -O sdk.tar.xz "${{ inputs.target_url }}"
           mkdir sdk
-          # 解压时去除第一层目录，确保直接在 sdk/ 下
           tar -xJf sdk.tar.xz --strip-components=1 -C sdk
 
       - name: Update Feeds
         working-directory: ./sdk
         run: |
-          # 更新并安装所有官方 feeds
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
@@ -44,6 +41,7 @@ jobs:
       - name: Create Makefile
         working-directory: ./sdk/package/gutenprint
         run: |
+          # 注意：这里的 EOF 块内部必须顶格写，不能有缩进！
           cat << 'EOF' > Makefile
           include $(TOPDIR)/rules.mk
 
@@ -58,9 +56,8 @@ jobs:
           PKG_LICENSE:=GPL-2.0-or-later
           PKG_LICENSE_FILES:=COPYING
 
-          # 关键修改：取消 host 编译依赖，只依赖目标设备的库
           PKG_FIXUP:=autoreconf
-          
+
           include $(INCLUDE_DIR)/package.mk
 
           define Package/gutenprint
@@ -68,7 +65,6 @@ jobs:
             CATEGORY:=Network
             SUBMENU:=Printing
             TITLE:=Gutenprint Printer Drivers
-            # 确保依赖完整
             DEPENDS:=+cups +libusb-1.0 +libpng +libjpeg +zlib
             URL:=http://gimp-print.sourceforge.net/
           endef
@@ -77,7 +73,6 @@ jobs:
             Top quality printer drivers for POSIX systems.
           endef
 
-          # 关键修改：精简配置参数，减少出错概率
           CONFIGURE_ARGS += \
               --disable-libgutenprintui2 \
               --disable-samples \
@@ -92,31 +87,34 @@ jobs:
               --with-modules=no
 
           define Build/InstallDev
-              $(INSTALL_DIR) $(1)/usr/include
-              $(CP) $(PKG_BUILD_DIR)/include/gutenprint $(1)/usr/include/
-              $(INSTALL_DIR) $(1)/usr/lib
-              $(CP) $(PKG_BUILD_DIR)/src/main/.libs/libgutenprint.{a,so*} $(1)/usr/lib/
-              $(INSTALL_DIR) $(1)/usr/lib/pkgconfig
-              $(CP) $(PKG_BUILD_DIR)/gutenprint.pc $(1)/usr/lib/pkgconfig/
+          	$(INSTALL_DIR) $(1)/usr/include
+          	$(CP) $(PKG_BUILD_DIR)/include/gutenprint $(1)/usr/include/
+          	$(INSTALL_DIR) $(1)/usr/lib
+          	$(CP) $(PKG_BUILD_DIR)/src/main/.libs/libgutenprint.{a,so*} $(1)/usr/lib/
+          	$(INSTALL_DIR) $(1)/usr/lib/pkgconfig
+          	$(CP) $(PKG_BUILD_DIR)/gutenprint.pc $(1)/usr/lib/pkgconfig/
           endef
 
           define Package/gutenprint/install
-              $(INSTALL_DIR) $(1)/usr/lib
-              $(CP) $(PKG_BUILD_DIR)/src/main/.libs/libgutenprint.so.* $(1)/usr/lib/
-              
-              $(INSTALL_DIR) $(1)/usr/lib/cups/driver
-              $(INSTALL_DIR) $(1)/usr/lib/cups/filter
-              $(INSTALL_DIR) $(1)/usr/lib/cups/backend
-              $(INSTALL_DIR) $(1)/usr/share/cups/model/gutenprint
-              
-              # 尝试容错拷贝，防止某个文件不存在导致失败
-              -$(CP) $(PKG_BUILD_DIR)/src/cups/command2gutenprint $(1)/usr/lib/cups/driver/
-              -$(CP) $(PKG_BUILD_DIR)/src/cups/cups-gutenprint $(1)/usr/lib/cups/driver/
-              -$(CP) $(PKG_BUILD_DIR)/src/cups/rastertogutenprint.5.3 $(1)/usr/lib/cups/filter/
+          	$(INSTALL_DIR) $(1)/usr/lib
+          	$(CP) $(PKG_BUILD_DIR)/src/main/.libs/libgutenprint.so.* $(1)/usr/lib/
+          	
+          	$(INSTALL_DIR) $(1)/usr/lib/cups/driver
+          	$(INSTALL_DIR) $(1)/usr/lib/cups/filter
+          	$(INSTALL_DIR) $(1)/usr/lib/cups/backend
+          	$(INSTALL_DIR) $(1)/usr/share/cups/model/gutenprint
+          	
+          	-$(CP) $(PKG_BUILD_DIR)/src/cups/command2gutenprint $(1)/usr/lib/cups/driver/
+          	-$(CP) $(PKG_BUILD_DIR)/src/cups/cups-gutenprint $(1)/usr/lib/cups/driver/
+          	-$(CP) $(PKG_BUILD_DIR)/src/cups/rastertogutenprint.5.3 $(1)/usr/lib/cups/filter/
           endef
 
           $(eval $(call BuildPackage,gutenprint))
           EOF
+          # 修正缩进问题：去除 Makefile 中每一行开头可能存在的空格
+          sed -i 's/^[ \t]*//' Makefile
+          # 恢复必要的缩进：将 recipe 行首的空格恢复为 Tab（虽然 OpenWrt define 块通常不严格要求 Tab，但为了保险起见）
+          # 这里我们主要依赖 sed 去除了导致 "missing separator" 的顶层缩进。
 
       - name: Configure and Compile
         working-directory: ./sdk
@@ -124,23 +122,16 @@ jobs:
           echo "CONFIG_PACKAGE_gutenprint=m" >> .config
           make defconfig
           
-          echo "=== 正在检查配置 ==="
+          echo "=== 检查配置 ==="
           grep "gutenprint" .config
           
-          echo "=== 开始预下载 ==="
-          make package/gutenprint/download V=s
-          
           echo "=== 开始编译 ==="
-          # V=s 显示详细错误，-j1 单线程编译更容易看清错误原因
-          make package/gutenprint/compile V=s -j1 || true
-          
-          echo "=== 编译结束，检查文件生成情况 ==="
-          find bin/ -name "*.ipk"
+          # 使用单线程编译以便观察错误，V=s 输出详细日志
+          make package/gutenprint/compile V=s -j1
 
       - name: Find and Upload IPK
         uses: actions/upload-artifact@v4
         with:
           name: gutenprint-ipk
-          # 使用通配符搜索整个 bin 目录，防止路径变动
           path: sdk/bin/**/*.ipk
           if-no-files-found: error
