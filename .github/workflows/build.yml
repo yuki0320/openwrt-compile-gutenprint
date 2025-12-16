@@ -110,10 +110,16 @@ jobs:
       - name: Configure and Compile
         working-directory: ./sdk
         run: |
-          # 自动选中 gutenprint 包
-          sed -i 's/# CONFIG_PACKAGE_gutenprint is not set/CONFIG_PACKAGE_gutenprint=m/' .config
+          # 1. 强制写入开启 gutenprint 的配置（如果文件不存在会自动创建）
+          echo "CONFIG_PACKAGE_gutenprint=m" >> .config
+          
+          # 2. 让 SDK 根据上面的修改自动补全依赖关系
           make defconfig
-          # 开始编译 (使用多核加速)
+          
+          # 3. 检查一下 .config 里有没有 gutenprint (可选，用于调试)
+          grep "gutenprint" .config || true
+          
+          # 4. 开始编译 (V=s 显示详细日志，-j 自动多核)
           make package/gutenprint/compile V=s -j$(nproc)
 
       - name: Find and Upload IPK
