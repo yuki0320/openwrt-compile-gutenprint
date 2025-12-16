@@ -1,0 +1,123 @@
+name: Build Gutenprint for ImmortalWrt 21.02
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'SDK URL (Default for Rockchip/ARMv8 aarch64)'
+        required: true
+        default: 'https://downloads.immortalwrt.org/releases/21.02.1/targets/rockchip/armv8/immortalwrt-sdk-21.02.1-rockchip-armv8_gcc-8.4.0_musl.Linux-x86_64.tar.xz'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip python3
+
+      - name: Download and Extract SDK
+        run: |
+          wget -O sdk.tar.xz "${{ inputs.target_url }}"
+          mkdir sdk
+          tar -xJf sdk.tar.xz --strip-components=1 -C sdk
+
+      - name: Update Feeds
+        working-directory: ./sdk
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Create Package Directory
+        working-directory: ./sdk
+        run: |
+          mkdir -p package/gutenprint
+
+      - name: Create Makefile
+        working-directory: ./sdk/package/gutenprint
+        run: |
+          cat << 'EOF' > Makefile
+          include $(TOPDIR)/rules.mk
+
+          PKG_NAME:=gutenprint
+          PKG_VERSION:=5.3.3
+          PKG_RELEASE:=1
+
+          PKG_SOURCE:=gutenprint-$(PKG_VERSION).tar.xz
+          # 直接从 SourceForge 下载源码，不需要你手动上传
+          PKG_SOURCE_URL:=@SF/gimp-print
+          PKG_HASH:=7d32047872584d412d26f7a6375bc80362f689f4b301c23f7902d13b6329e46a
+
+          PKG_LICENSE:=GPL-2.0-or-later
+          PKG_LICENSE_FILES:=COPYING
+
+          include $(INCLUDE_DIR)/package.mk
+
+          define Package/gutenprint
+            SECTION:=net
+            CATEGORY:=Network
+            SUBMENU:=Printing
+            TITLE:=Gutenprint Printer Drivers
+            DEPENDS:=+cups +libusb-1.0 +libpng +libjpeg +zlib
+            URL:=http://gimp-print.sourceforge.net/
+          endef
+
+          define Package/gutenprint/description
+            Top quality printer drivers for POSIX systems.
+          endef
+
+          CONFIGURE_ARGS += \
+              --disable-libgutenprintui2 \
+              --disable-samples \
+              --without-gimp2 \
+              --without-doc \
+              --disable-nls \
+              --enable-cups \
+              --with-cups=/usr \
+              --disable-static
+
+          define Build/InstallDev
+              $(INSTALL_DIR) $(1)/usr/include
+              $(CP) $(PKG_BUILD_DIR)/include/gutenprint $(1)/usr/include/
+              $(INSTALL_DIR) $(1)/usr/lib
+              $(CP) $(PKG_BUILD_DIR)/src/main/.libs/libgutenprint.{a,so*} $(1)/usr/lib/
+              $(INSTALL_DIR) $(1)/usr/lib/pkgconfig
+              $(CP) $(PKG_BUILD_DIR)/gutenprint.pc $(1)/usr/lib/pkgconfig/
+          endef
+
+          define Package/gutenprint/install
+              $(INSTALL_DIR) $(1)/usr/lib
+              $(CP) $(PKG_BUILD_DIR)/src/main/.libs/libgutenprint.so.* $(1)/usr/lib/
+              
+              # 安装 CUPS 驱动相关文件
+              $(INSTALL_DIR) $(1)/usr/lib/cups/driver
+              $(INSTALL_DIR) $(1)/usr/lib/cups/filter
+              $(INSTALL_DIR) $(1)/usr/lib/cups/backend
+              $(INSTALL_DIR) $(1)/usr/share/cups/model/gutenprint
+              
+              $(CP) $(PKG_BUILD_DIR)/src/cups/command2gutenprint $(1)/usr/lib/cups/driver/
+              $(CP) $(PKG_BUILD_DIR)/src/cups/cups-gutenprint $(1)/usr/lib/cups/driver/
+              $(CP) $(PKG_BUILD_DIR)/src/cups/rastertogutenprint.5.3 $(1)/usr/lib/cups/filter/
+          endef
+
+          $(eval $(call BuildPackage,gutenprint))
+          EOF
+
+      - name: Configure and Compile
+        working-directory: ./sdk
+        run: |
+          # 自动选中 gutenprint 包
+          sed -i 's/# CONFIG_PACKAGE_gutenprint is not set/CONFIG_PACKAGE_gutenprint=m/' .config
+          make defconfig
+          # 开始编译 (使用多核加速)
+          make package/gutenprint/compile V=s -j$(nproc)
+
+      - name: Find and Upload IPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gutenprint-ipk
+          path: sdk/bin/packages/*/base/gutenprint*.ipk
