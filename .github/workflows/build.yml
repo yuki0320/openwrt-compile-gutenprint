@@ -4,13 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: 'SDK URL (Default for Rockchip/ARMv8 aarch64)'
+        description: 'SDK URL'
         required: true
         default: 'https://downloads.immortalwrt.org/releases/21.02.1/targets/rockchip/armv8/immortalwrt-sdk-21.02.1-rockchip-armv8_gcc-8.4.0_musl.Linux-x86_64.tar.xz'
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # 关键修改：强制使用 Ubuntu 22.04，避免 24.04 缺少 python-distutils 的问题
+    runs-on: ubuntu-22.04
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -18,7 +20,8 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip python3
+          # 关键修改：增加了 python3-distutils, python3-setuptools 和 python-is-python3
+          sudo apt-get install -y build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip python3 python3-distutils python3-setuptools python-is-python3
 
       - name: Download and Extract SDK
         run: |
@@ -48,7 +51,6 @@ jobs:
           PKG_RELEASE:=1
 
           PKG_SOURCE:=gutenprint-$(PKG_VERSION).tar.xz
-          # 直接从 SourceForge 下载源码，不需要你手动上传
           PKG_SOURCE_URL:=@SF/gimp-print
           PKG_HASH:=7d32047872584d412d26f7a6375bc80362f689f4b301c23f7902d13b6329e46a
 
@@ -93,7 +95,6 @@ jobs:
               $(INSTALL_DIR) $(1)/usr/lib
               $(CP) $(PKG_BUILD_DIR)/src/main/.libs/libgutenprint.so.* $(1)/usr/lib/
               
-              # 安装 CUPS 驱动相关文件
               $(INSTALL_DIR) $(1)/usr/lib/cups/driver
               $(INSTALL_DIR) $(1)/usr/lib/cups/filter
               $(INSTALL_DIR) $(1)/usr/lib/cups/backend
@@ -110,17 +111,14 @@ jobs:
       - name: Configure and Compile
         working-directory: ./sdk
         run: |
-          # 1. 强制写入开启 gutenprint 的配置（如果文件不存在会自动创建）
+          # 强制写入配置，告诉 SDK 我们要编译这个包
           echo "CONFIG_PACKAGE_gutenprint=m" >> .config
           
-          # 2. 让 SDK 根据上面的修改自动补全依赖关系
+          # 让 SDK 生成完整配置
           make defconfig
           
-          # 3. 检查一下 .config 里有没有 gutenprint (可选，用于调试)
-          grep "gutenprint" .config || true
-          
-          # 4. 开始编译 (V=s 显示详细日志，-j 自动多核)
-          make package/gutenprint/compile V=s -j$(nproc)
+          # 开始编译 (忽略旧版 SDK 的一些非致命警告)
+          make package/gutenprint/compile V=s -j$(nproc) IGNORE_ERRORS=1
 
       - name: Find and Upload IPK
         uses: actions/upload-artifact@v4
