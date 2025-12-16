@@ -16,10 +16,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-- name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip python3 python3-distutils python3-setuptools python-is-python3 file rsync libcups2-dev
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git gettext libssl-dev xsltproc wget unzip python3 python3-distutils python3-setuptools python-is-python3 file rsync libcups2-dev
       - name: Download and Extract SDK
         run: |
           wget -O sdk.tar.xz "${{ inputs.target_url }}"
